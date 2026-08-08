@@ -1,0 +1,12 @@
+build/
+benchmark/results/
+CMakefile/
+.cache/
+.vscode
+CMakeLists.txt
+
+
+# files ca nhan
+note.txt
+tavily_migration_guide.md
+agent_memory.db

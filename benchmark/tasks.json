@@ -1,0 +1,10 @@
+[
+  {
+    "id": "task_008",
+    "description": "all tool",
+    "instruction": "đầu tiên, bạn hãy nghĩ về bạn là ai, rồi sau đó, bạn lên web timf kiếm về bạn, rồi bạn ghi nó vào file. sau đó bạn đọc lại file của mình và đưa lên màn hình console bằng exec tool, sau đó bạn lọc lại thông tin rồi lên web tìm có đúng như thế không.",
+    "eval_type": "keyword",
+    "eval_script": "w3school",
+    "max_steps": 15
+  }
+]

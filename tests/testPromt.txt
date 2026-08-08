@@ -1,0 +1,6 @@
+count me from 1 to 100 with following:
+- index is i,
+- step = 2
+- each number in a line
+- not using code to solve this problem
+- print for me only number 
