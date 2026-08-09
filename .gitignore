@@ -3,9 +3,10 @@ benchmark/results/
 CMakefile/
 .cache/
 .vscode
+data/
+*.db
 
 
 # files ca nhan
 note.txt
 tavily_migration_guide.md
-agent_memory.db

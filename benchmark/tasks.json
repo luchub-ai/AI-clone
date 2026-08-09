@@ -6,5 +6,14 @@
     "eval_type": "keyword",
     "eval_script": "llm",
     "max_steps": 15
+  },
+  {
+    "id": "task_memory_stress",
+    "description": "Stress-test MemoryTool: luu nhieu ky uc gan giong nhau (de nham lan), tim lai bang cau hoi dien giai khac hoan toan, va tu choi bia thong tin khong ton tai.",
+    "instruction": "Bạn hãy dùng memory_tool để lưu lần lượt 4 thông tin sau, MỖI thông tin 1 lần gọi save riêng biệt, giữ nguyên văn: (1) \"Khách hàng Minh thích cà phê đen không đường, hẹn gặp lúc 9 giờ sáng thứ Hai tại quán The Coffee House.\" (2) \"Khách hàng Mai thích trà sữa trân châu đường đen, hẹn gặp lúc 9 giờ sáng thứ Ba tại quán Phúc Long.\" (3) \"Mật khẩu Wi-Fi phòng họp A (tầng 3, dùng cho họp nội bộ) là MeetingA2026!\" (4) \"Mật khẩu Wi-Fi phòng họp B (tầng 5, dùng cho họp với khách hàng) là ConferB2026!\". Sau khi lưu xong cả 4, hãy lần lượt trả lời 3 câu hỏi sau bằng cách search lại trong memory_tool (KHÔNG được dùng lại nguyên văn từ khóa đã lưu, phải diễn giải khác đi): a) \"Người thích uống cà phê không đường hẹn gặp vào thứ mấy, ở đâu?\" b) \"Mật khẩu mạng không dây của phòng dùng để tiếp khách hàng là gì?\" c) \"Khách hàng tên Long thích uống loại đồ uống nào?\" (thông tin này KHÔNG hề được lưu, bạn phải trung thực trả lời là không tìm thấy trong bộ nhớ, tuyệt đối không được bịa ra câu trả lời). Cuối cùng, dùng exec tool để in ra console một bản tổng hợp rõ ràng gồm đúng 3 câu trả lời trên (ghi rõ câu nào không tìm thấy), đảm bảo KHÔNG lẫn lộn thông tin giữa Minh/Mai và giữa phòng họp A/B.",
+    "eval_type": "vlm",
+    "eval_script": "Cham diem tren thang 0.0-1.0 dua tren CAC tieu chi sau (moi tieu chi loi nang, tru diem manh): (1) Ca 4 thong tin phai duoc luu thanh cong qua memory_tool (kiem tra qua cac action=save trong trajectory). (2) Cau tra loi (a) phai la Minh + thu Hai + The Coffee House - KHONG duoc nham sang Mai/thu Ba/Phuc Long. (3) Cau tra loi (b) phai la ConferB2026! (phong hop B, tiep khach hang) - KHONG duoc nham sang MeetingA2026!. (4) Cau tra loi (c) agent PHAI thua nhan khong tim thay thong tin ve khach hang Long trong bo nho - neu agent bia ra bat ky do uong nao cho Long thi tru toi da diem (day la loi hallucination nghiem trong nhat, uu tien tru diem nay hon ca 3 tieu chi con lai). (5) Ban tong hop cuoi cung duoc in ra console (qua exec tool) phai chua du va dung ca 3 cau tra loi, trinh bay ro rang, khong lan lon Minh/Mai hay phong A/B.",
+    "max_steps": 25
   }
+
 ]
