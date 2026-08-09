@@ -9,9 +9,9 @@
 
 ScreenshotTool::ScreenshotTool(WorkspaceProvider workspace_provider)
     : workspace_provider_(std::move(workspace_provider)) {
-    // Không tạo thư mục ở đây: workspace có thể chưa sẵn sàng lúc constructor
-    // chạy (Environment::setup() có thể được gọi sau khi tool đã đăng ký).
-    // Thư mục sẽ được tạo lazy ngay trước khi dùng, trong generateOutputPath().
+    // Khong tao thu muc o day: workspace co the chua san sang luc constructor
+    // chay (Environment::setup() co the duoc goi sau khi tool da dang ky).
+    // Thu muc se duoc tao lazy ngay truoc khi dung, trong generateOutputPath().
 }
 
 std::string ScreenshotTool::getName() const {
@@ -28,20 +28,15 @@ std::filesystem::path ScreenshotTool::generateOutputPath() const {
     std::filesystem::path save_dir = workspace_provider_() / "screenshots";
     std::filesystem::create_directories(save_dir);
 
-    // Format: shot_<nam><thang><ngay>_<gio><phut><giay>.png
-    // Vi du: shot_20260723_143059.png
-    // Dung yyyyMMdd truoc de sort theo ten file ~= sort theo thoi gian.
     std::time_t now_c = std::time(nullptr);
     std::tm local_tm{};
-    localtime_r(&now_c, &local_tm); // ham POSIX, thread-safe (Linux/macOS)
+    localtime_r(&now_c, &local_tm);
 
     char buf[32];
     std::strftime(buf, sizeof(buf), "shot_%Y%m%d_%H%M%S.png", &local_tm);
 
     std::filesystem::path candidate = save_dir / buf;
 
-    // Neu 2 lan chup roi vao cung 1 giay (trung ten), them hau to _1, _2...
-    // de khong ghi de anh cu.
     if (std::filesystem::exists(candidate)) {
         int suffix = 1;
         std::filesystem::path alt;
@@ -57,7 +52,6 @@ std::filesystem::path ScreenshotTool::generateOutputPath() const {
     return candidate;
 }
 
-// Sinh token ngẫu nhiên cho request/handle theo yêu cầu spec portal
 static std::string randomToken() {
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -70,6 +64,33 @@ static std::string randomToken() {
     return oss.str();
 }
 
+// RAII guard: dam bao dbus_bus_remove_match luon duoc goi khi ham
+// callPortalScreenshot ket thuc, du la return som vi loi hay thanh cong.
+// Neu khong co guard nay, moi lan goi Screenshot() them 1 match rule
+// tren session bus ma khong bao gio duoc go, tich luy dan trong 1
+// GUIAgentLoop chay lien tuc nhieu vong.
+namespace {
+class DBusMatchGuard {
+public:
+    DBusMatchGuard(DBusConnection* conn, std::string rule)
+        : conn_(conn), rule_(std::move(rule)) {}
+    ~DBusMatchGuard() {
+        if (conn_) {
+            DBusError err;
+            dbus_error_init(&err);
+            dbus_bus_remove_match(conn_, rule_.c_str(), &err);
+            if (dbus_error_is_set(&err)) dbus_error_free(&err);
+        }
+    }
+    DBusMatchGuard(const DBusMatchGuard&) = delete;
+    DBusMatchGuard& operator=(const DBusMatchGuard&) = delete;
+
+private:
+    DBusConnection* conn_;
+    std::string rule_;
+};
+} // namespace
+
 bool ScreenshotTool::callPortalScreenshot(std::string& uri_out, std::string& error_out) const {
     DBusError err;
     dbus_error_init(&err);
@@ -81,16 +102,14 @@ bool ScreenshotTool::callPortalScreenshot(std::string& uri_out, std::string& err
         return false;
     }
 
-    // Lấy unique name của mình để build đường dẫn handle theo spec portal
     const char* unique_name = dbus_bus_get_unique_name(conn);
-    std::string sender = unique_name ? unique_name + 1 : ""; // bỏ dấu ':' đầu
+    std::string sender = unique_name ? unique_name + 1 : "";
     for (auto& c : sender) if (c == '.') c = '_';
 
     std::string handle_token = randomToken();
     std::string expected_handle =
         "/org/freedesktop/portal/desktop/request/" + sender + "/" + handle_token;
 
-    // Subscribe signal Response trên request object trước khi gọi Screenshot
     std::string match_rule =
         "type='signal',interface='org.freedesktop.portal.Request',"
         "member='Response',path='" + expected_handle + "'";
@@ -102,7 +121,10 @@ bool ScreenshotTool::callPortalScreenshot(std::string& uri_out, std::string& err
     }
     dbus_connection_flush(conn);
 
-    // Build message gọi Screenshot(parent_window="", options={"handle_token": token})
+    // Tu day tro di neu return som (loi hay thanh cong) thi match rule
+    // van luon duoc go nho guard nay.
+    DBusMatchGuard match_guard(conn, match_rule);
+
     DBusMessage* msg = dbus_message_new_method_call(
         "org.freedesktop.portal.Desktop",
         "/org/freedesktop/portal/desktop",
@@ -127,7 +149,10 @@ bool ScreenshotTool::callPortalScreenshot(std::string& uri_out, std::string& err
 
     dbus_message_iter_close_container(&iter, &options_iter);
 
-    DBusMessage* reply = dbus_connection_send_with_reply_and_block(conn, msg, 5000, &err);
+    // Timeout ngan hon (10s) cho call ban dau: day chi la B1 (gui yeu cau,
+    // portal tra ve object path ngay), khong phai luc doi user bam Allow -
+    // buoc do nam o vong doi signal Response ben duoi.
+    DBusMessage* reply = dbus_connection_send_with_reply_and_block(conn, msg, 10000, &err);
     dbus_message_unref(msg);
 
     if (dbus_error_is_set(&err) || !reply) {
@@ -145,48 +170,62 @@ bool ScreenshotTool::callPortalScreenshot(std::string& uri_out, std::string& err
         return false;
     }
 
-    // ---- Đợi signal Response (user bấm Allow/Deny) ----
+    // ---- Doi signal Response ----
+    // 60s cho lan dau (user co the mat vai giay de bam Allow). Neu quyen da
+    // duoc "Remember" tu lan truoc, GNOME tra Response gan nhu ngay lap tuc
+    // nen thoi gian cho thuc te trong GUIAgentLoop se rat ngan.
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
     bool got_response = false;
-    uint32_t response_code = 1; // 1 = cancelled mặc định
+    uint32_t response_code = 1; // 1 = cancelled mac dinh
 
     while (std::chrono::steady_clock::now() < deadline) {
         dbus_connection_read_write(conn, 200);
         DBusMessage* signal_msg = dbus_connection_pop_message(conn);
         if (!signal_msg) continue;
 
-        if (dbus_message_is_signal(signal_msg, "org.freedesktop.portal.Request", "Response")) {
-            DBusMessageIter sig_iter;
-            dbus_message_iter_init(signal_msg, &sig_iter);
-            dbus_message_iter_get_basic(&sig_iter, &response_code);
+        // Chi xu ly dung signal cua request nay (phong truong hop connection
+        // dung chung voi phan khac cua app nhan duoc message khac chen vao).
+        const bool is_ours =
+            dbus_message_is_signal(signal_msg, "org.freedesktop.portal.Request", "Response") &&
+            dbus_message_get_path(signal_msg) != nullptr &&
+            expected_handle == dbus_message_get_path(signal_msg);
 
-            if (response_code == 0) { // 0 = success
-                dbus_message_iter_next(&sig_iter); // vào dict a{sv}
-                DBusMessageIter dict_iter;
-                dbus_message_iter_recurse(&sig_iter, &dict_iter);
-                while (dbus_message_iter_get_arg_type(&dict_iter) == DBUS_TYPE_DICT_ENTRY) {
-                    DBusMessageIter entry, variant;
-                    dbus_message_iter_recurse(&dict_iter, &entry);
-                    const char* k = nullptr;
-                    dbus_message_iter_get_basic(&entry, &k);
-                    dbus_message_iter_next(&entry);
-                    dbus_message_iter_recurse(&entry, &variant);
-                    if (k && std::string(k) == "uri") {
-                        const char* uri = nullptr;
-                        dbus_message_iter_get_basic(&variant, &uri);
-                        if (uri) uri_out = uri;
-                    }
-                    dbus_message_iter_next(&dict_iter);
-                }
-            }
-            got_response = true;
+        if (!is_ours) {
+            dbus_message_unref(signal_msg);
+            continue;
         }
+
+        DBusMessageIter sig_iter;
+        dbus_message_iter_init(signal_msg, &sig_iter);
+        dbus_message_iter_get_basic(&sig_iter, &response_code);
+
+        if (response_code == 0) { // 0 = success
+            dbus_message_iter_next(&sig_iter);
+            DBusMessageIter dict_iter;
+            dbus_message_iter_recurse(&sig_iter, &dict_iter);
+            while (dbus_message_iter_get_arg_type(&dict_iter) == DBUS_TYPE_DICT_ENTRY) {
+                DBusMessageIter entry, variant;
+                dbus_message_iter_recurse(&dict_iter, &entry);
+                const char* k = nullptr;
+                dbus_message_iter_get_basic(&entry, &k);
+                dbus_message_iter_next(&entry);
+                dbus_message_iter_recurse(&entry, &variant);
+                if (k && std::string(k) == "uri") {
+                    const char* uri = nullptr;
+                    dbus_message_iter_get_basic(&variant, &uri);
+                    if (uri) uri_out = uri;
+                }
+                dbus_message_iter_next(&dict_iter);
+            }
+        }
+        got_response = true;
         dbus_message_unref(signal_msg);
-        if (got_response) break;
+        break;
     }
 
     if (!got_response) {
-        error_out = "Timeout: user khong phan hoi dialog xin quyen trong 60s";
+        error_out = "Timeout: khong nhan duoc phan hoi tu portal trong 60s "
+                     "(user chua bam Allow lan dau, hoac quyen da bi thu hoi)";
         return false;
     }
     if (response_code != 0) {
@@ -207,7 +246,6 @@ std::optional<std::string> ScreenshotTool::execute(const std::string& /*args*/) 
         return std::nullopt;
     }
 
-    // uri dạng "file:///tmp/xxxx.png" -> chuyển thành path thường
     std::string path_str = uri;
     const std::string prefix = "file://";
     if (path_str.rfind(prefix, 0) == 0) {
@@ -218,12 +256,11 @@ std::optional<std::string> ScreenshotTool::execute(const std::string& /*args*/) 
         return std::nullopt;
     }
 
-    // Copy vào workspace hiện tại để thống nhất chỗ lưu
     std::filesystem::path dest = generateOutputPath();
     std::error_code ec;
     std::filesystem::copy_file(path_str, dest, ec);
     if (ec) {
-        return path_str; // fallback: trả path gốc nếu copy lỗi
+        return path_str;
     }
 
     return dest.string();

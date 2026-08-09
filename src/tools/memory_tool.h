@@ -18,7 +18,7 @@ private:
 
 public:
     // C++17: Constructor explicit chống convert ngầm định
-    explicit MemoryTool(const std::string& db_path = "agent_memory.db"); // xem nó nên được trỏ vô đâu
+    explicit MemoryTool(const std::string& db_path = "data/agent_memory.db"); // xem nó nên được trỏ vô đâu
     
     ~MemoryTool() override;
 

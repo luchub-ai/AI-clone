@@ -1,0 +1,27 @@
+{
+    "agent_type": "GUIAgentLoop",
+    "average_score": 0.0,
+    "base_url": "http://localhost:11434",
+    "client": "ollama",
+    "crashed_tasks": 0,
+    "model": "gemma4:e4b",
+    "scale_x": 1.0,
+    "scale_y": 1.0,
+    "scored_tasks": 1,
+    "screenshot_max_width": null,
+    "succeeded_tasks": 0,
+    "success_rate": 0.0,
+    "tasks": [
+        {
+            "crashed": false,
+            "description": "all tool",
+            "score": 0.0,
+            "score_error": null,
+            "task_id": "task_008",
+            "task_success": false,
+            "trajectory_file": "trajectory_task_008.json",
+            "trajectory_success": true
+        }
+    ],
+    "total_tasks": 1
+}

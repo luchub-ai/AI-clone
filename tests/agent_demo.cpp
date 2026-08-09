@@ -9,7 +9,7 @@
 #include "src/agent/react_agent_loop.h"
 #include "src/agent/skill_loader.h"
 #include "src/agent/loop_detector.h"
-#include "src/harness/environment.h"
+#include "src/harness/environment/environment.h"
 #include "src/common/task.h"
 
 int main() {
@@ -28,8 +28,8 @@ int main() {
 
     // 3. Tool Registry - chi dang ky 2 tool dang can test
     auto tools = std::make_shared<ToolRegistry>();
-    tools->registerTool(std::make_unique<FileTool>(
-        [&env] { return env.getWorkspace(); }));
+    tools->registerTool(std::make_unique<FileTool>
+        (env.get()));
     // Can bien moi truong TAVILY_API_KEY da set truoc khi chay demo nay
     // (vd `export TAVILY_API_KEY=tvly-...`), khong thi WebSearchTool se
     // tra loi "chua cau hinh" ngay khi agent goi toi.

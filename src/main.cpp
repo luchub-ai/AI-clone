@@ -1,69 +1,59 @@
+#include "src/agent/gui_agent_loop.h"
+#include "src/tools/input_tool.h"
+#include "src/tools/screenshot_tool.h"
+#include "src/tools/tool_registry.h"
+#include "src/harness/environment/environment.h"
+#include "src/tools/exec_tool.h"
+#include "src/tools/file_tool.h"
+#include "src/client/ollama_client.h"
+#include "src/client/colab_client.h"
 #include <iostream>
-#include <memory>
-#include <cstdlib>
-#include <string>
-#include <nlohmann/json.hpp>
-#include "src/tools/web_search_tool.h" // Điều chỉnh lại đường dẫn include tùy cấu trúc thư mục của bạn
 
-using json = nlohmann::json;
 
-void printSeparator(const std::string& title) {
-    std::cout << "\n==================================================\n";
-    std::cout << "  " << title << "\n";
-    std::cout << "==================================================\n";
-}
+// TODO: doi ten class LLMClient/SkillLoader/LoopDetector cu the ban dang
+// dung thay cho cac placeholder duoi day (ban da co san o main.cpp that,
+// chi copy nguyen doan khoi tao do sang, KHONG can doi gi).
 
-int main() {
-    printSeparator("KHỞI TẠO WEB SEARCH TOOL");
+int main(int argc, char** argv) {
+    auto environment = std::make_shared<NativeEnvironment>();
+    environment->setup();
 
-    // 1. Lấy API Key từ biến môi trường (TAVILY_API_KEY)
-    const char* api_key_env = std::getenv("TAVILY_API_KEY");
-    std::string api_key = api_key_env ? std::string(api_key_env) : "";
+    auto tools = std::make_shared<ToolRegistry>();
+    tools->registerTool(std::make_unique<ExecTool>(environment.get(),2,false));
+    tools->registerTool(std::make_unique<FileTool>(environment.get()));
 
-    if (api_key.empty()) {
-        std::cerr << "[CẢNH BÁO] Chưa set biến môi trường TAVILY_API_KEY!\n";
-        std::cerr << "Hãy chạy lệnh: export TAVILY_API_KEY=\"tvly-xxxx...\" trong Terminal trước khi build/test.\n";
-        // Bạn có thể tạm paste hardcode key vào đây để test nhanh nếu muốn:
-        // api_key = "tvly-dieu-khac-key-cua-ban-vao-day";
-        return 1;
-    }
-
-    // 2. Khởi tạo tool với cấu hình chuẩn
-    std::string tavily_url = "https://api.tavily.com";
-    int max_results = 5;
-    int timeout_sec = 15;
-
-    auto search_tool = std::make_unique<WebSearchTool>(api_key, tavily_url, max_results, timeout_sec);
-    std::cout << "[OK] Đã khởi tạo Tool: " << search_tool->getName() << "\n";
-
-    // -----------------------------------------------------------------
-    // TEST CASE: Tìm kiếm từ khóa "lê quang liêm là ai"
-    // -----------------------------------------------------------------
-    printSeparator("THỰC THI SEARCH QUERY");
-
-    // 3. Đóng gói tham số đầu vào đúng chuẩn JSON mà description của Tool yêu cầu
-    json args_json = {
-        {"query", "lê quang liêm là ai"},
-        {"num_results", 3},      // Chỉ lấy 3 kết quả tốt nhất để đọc cho nhanh
-        {"time_range", "year"}   // Lấy thông tin trong 1 năm trở lại đây (tùy chọn)
-    };
-
-    std::string args_str = args_json.dump();
-    std::cout << "[Input Args]: " << args_str << "\n\n";
-    std::cout << "Đang gửi request lên Tavily API... (Vui lòng đợi vài giây)\n";
-
-    // 4. Gọi thực thi hàm execute
-    std::optional<std::string> result = search_tool->execute(args_str);
-
-    // 5. Kiểm tra và in kết quả trả về
-    printSeparator("KẾT QUẢ TRẢ VỀ TỪ TAVILY");
-    if (result.has_value()) {
-        std::cout << *result << "\n";
-        std::cout << "=> [PASS] Test tìm kiếm thành công!\n";
+    if (environment->supportsGui()) {
+        CommandRunner input_runner = [environment](const std::string& cmd) {
+            return environment->execute(cmd, /*timeoutSeconds=*/5);
+        };
+        tools->registerTool(std::make_unique<InputTool>(input_runner));
+        tools->registerTool(std::make_unique<ScreenshotTool>(
+            [environment] { return std::filesystem::path(environment->getWorkspace()); }));
     } else {
-        std::cerr << "=> [FAILED] Tool trả về nullopt (Lỗi thực thi nghiêm trọng).\n";
+        std::cerr << "CANH BAO: Environment hien tai khong ho tro GUI "
+                     "(supportsGui() == false) - InputTool/ScreenshotTool "
+                     "se khong duoc dang ky.\n";
     }
 
-    printSeparator("HOÀN TẤT TEST CASE");
+    auto llm = std::make_unique<ColabClient>("http://localhost:11434","gemma4:e4b",0.2f,2048);  // TODO: doi ten class + model that
+    auto skills = std::make_unique<SkillLoader>(/* ... nhu cu ... */);
+    auto loop_detector = std::make_unique<LoopDetector>(/* ... nhu cu ... */);
+
+    GUIAgentLoop gui_loop(std::move(llm), tools, std::move(skills), std::move(loop_detector));
+
+    Task task;                       // TODO: dien dung field theo Task that (xem trajectory.h)
+    task.instruction = argc > 1 ? argv[1]
+        : "bạn mở gmail trên google, soạn cho tôi tin nhắn với tiltle là name, nội dung là gui đã xong cho nqkhanh2510@clc.fitus.edu.vn";
+    
+    task.max_steps = 15;
+
+    Trajectory result = gui_loop.run(task);
+
+    std::cout << "\n=== Ket qua ===\n";
+    for (const auto& step : result.steps) {  // TODO: doi ten field theo Trajectory that
+        std::cout << "- [" << step.action_type << "] " << step.tool_name << "\n";
+    }
+
+    environment->teardown();
     return 0;
 }

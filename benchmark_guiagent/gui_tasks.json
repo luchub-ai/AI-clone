@@ -1,0 +1,10 @@
+[
+  {
+    "id": "task_008",
+    "description": "all tool",
+    "instruction": "lên google tra lê quang liêm là ai",
+    "eval_type": "keyword",
+    "eval_script": "w3school",
+    "max_steps": 15
+  }
+]

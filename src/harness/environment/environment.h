@@ -19,6 +19,7 @@ public:
     virtual void setup()    = 0;   // Gọi trước khi agent bắt đầu chạy
     virtual void teardown() = 0;   // Gọi sau khi eval xong để dọn dẹp
     virtual const std::string& getWorkspace() const = 0;
+    virtual bool supportsGui() const { return false; }
 
     // Chạy lệnh shell trong workspace. Đây là điểm KHÁC BIỆT thật sự
     // giữa các Environment nên để pure virtual.
@@ -67,6 +68,7 @@ public:
     void setup()    override;
     void teardown() override;
     const std::string& getWorkspace() const override { return work_dir_; }
+    bool supportsGui() const override { return true; }
     std::optional<std::string> execute(const std::string& command,
                                          int timeoutSeconds) override;
 };

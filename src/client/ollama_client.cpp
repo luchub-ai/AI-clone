@@ -111,8 +111,8 @@ LLMResponse OllamaClient::chat(const std::vector<Message>& history) {
 
     std::string json_str = request_body.dump();
     // // === debug == 
-    // std::string json_str_test = request_body.dump(4);
-    // std::cout << "===== debug llmclient =====\n " << json_str_test << std::endl;
+    std::string json_str_test = request_body.dump(4);
+    std::cout << "===== debug llmclient =====\n " << json_str_test << std::endl;
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_str.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);

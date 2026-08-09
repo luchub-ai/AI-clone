@@ -4,6 +4,7 @@
 #include <chrono>
 #include <iostream>
 #include <utility>
+#include "utils/resolve_imagebase64.h"
 
 using json = nlohmann::json;
 
@@ -26,7 +27,6 @@ void ColabClient::handleError(const std::string& error_type, const std::string& 
     }
 }
 
-// [THAY ĐỔI THEO UML]: Sửa chữ ký hàm cho khớp prototype mới
 LLMResponse ColabClient::chat(const std::vector<Message>& history) {
     LLMResponse response;
     response.model = model_name;
@@ -50,21 +50,19 @@ LLMResponse ColabClient::chat(const std::vector<Message>& history) {
 
     curl_easy_setopt(curl, CURLOPT_URL, full_url.c_str());
     
-    // [CẬP NHẬT 1 - BẮT BUỘC]: Nới rộng thời gian chờ lên 120 giây (2 phút)
-    // Để tránh cURL bóp cổ luồng khi mô hình LLaVA trên Colab đang dịch ảnh Base64
+    // [COLAB SPECIFIC]: Timeout dài cho model Vision trên Colab
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 200L); 
 
     struct curl_slist* headers = nullptr;
     headers = curl_slist_append(headers, "Content-Type: application/json");
     
-    // [CẬP NHẬT 2 - BẮT BUỘC]: Tiêm mật mã vượt tường lửa cảnh báo của Ngrok Free
-    // Nếu thiếu dòng này, Ngrok sẽ trả về trang HTML cảnh báo làm văng lỗi MALFORMED_JSON
+    // [COLAB SPECIFIC]: Vượt tường lửa Ngrok Free
     headers = curl_slist_append(headers, "ngrok-skip-browser-warning: 69420");
     
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 
     // ===================================================================
-    // 1. DỰNG MẢNG "MESSAGES" TỪ HISTORY
+    // 1. DỰNG MẢNG "MESSAGES" TỪ HISTORY (ĐÃ TÍCH HỢP SANITIZER)
     // ===================================================================
     json messages_array = json::array();
 
@@ -74,32 +72,51 @@ LLMResponse ColabClient::chat(const std::vector<Message>& history) {
             {"content", msg.content}
         };
         
-        if (!msg.images_base64.empty()) {
-            json_msg["images"] = msg.images_base64;
+        // Cải tiến: Lọc và chuyển đổi từng phần tử trong mảng ảnh
+        if (!msg.images_base64.empty()) {   
+            json valid_images = json::array();
+
+            for (const auto& img_item : msg.images_base64) {
+                auto resolved_b64 = resolveImageToBase64(img_item);
+                
+                if (resolved_b64.has_value() && !resolved_b64->empty()) {
+                    valid_images.push_back(*resolved_b64);
+                }
+            }
+
+            if (!valid_images.empty()) {
+                json_msg["images"] = valid_images;
+            } else {
+                std::cout << "[Sanitizer] Toàn bộ ảnh của message bị lỗi. Đã hủy trường 'images'.\n";
+            }
         }
+
         messages_array.push_back(json_msg);
     }
 
     // ===================================================================
-    // 2. NẠP BODY CHUẨN OLLAMA API
+    // 2. NẠP BODY CHUẨN OLLAMA API 
     // ===================================================================
     json request_body = {
         {"model", this->model_name},
         {"messages", messages_array},
         {"stream", false},
         
-        // [CẬP NHẬT 3 - KHUYÊN DÙNG]: Ép Colab giữ mô hình trên VRAM vĩnh viễn
-        // Tránh việc Google tự động dỡ trọng số LLM xuống khi bạn dừng code lâu
+        // [COLAB SPECIFIC]: Giữ mô hình trên VRAM vĩnh viễn
         {"keep_alive", -1}, 
         
         {"options", {
             {"temperature", this->temperature},
-            {"num_predict", this->max_tokens} 
+            {"num_predict", this->max_tokens},
+            {"num_ctx", this->max_tokens * 4} // [CẬP NHẬT TỪ OLLAMA_CLIENT]
         }}
     };
 
     std::string json_str = request_body.dump();
-    // std::cout << json_str << "\n\n";
+    
+    // Bật lên nếu bạn cần debug xem cấu trúc JSON truyền đi
+    // std::cout << "===== debug colab client =====\n " << request_body.dump(4) << std::endl;
+    
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_str.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
