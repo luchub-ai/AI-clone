@@ -3,7 +3,6 @@ benchmark/results/
 CMakefile/
 .cache/
 .vscode
-CMakeLists.txt
 
 
 # files ca nhan
