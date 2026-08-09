@@ -79,6 +79,7 @@
 
 #include "src/client/ollama_client.h"
 #include "src/client/colab_client.h"
+#include "src/client/ollama_embedding_client.h"
 #include "src/agent/react_agent_loop.h"
 #include "src/agent/skill_loader.h"
 #include "src/agent/loop_detector.h"
@@ -245,7 +246,12 @@ int main(int argc, char** argv) {
 
     auto tools = std::make_shared<ToolRegistry>();
     tools->registerTool(std::make_unique<CalculatorTool>());
-    tools->registerTool(std::make_unique<MemoryTool>());
+    // Dung chung opt.base_url voi OllamaClient (cung 1 Ollama server, chi
+    // khac endpoint /api/embed vs /api/chat) - neu Ollama khong chay/khong
+    // co model nomic-embed-text, embed() se tra nullopt va MemoryTool tu
+    // fallback ve LIKE keyword search (xem memory_tool.cpp), KHONG crash.
+    tools->registerTool(std::make_unique<MemoryTool>(
+        "data/agent_memory.db", std::make_shared<OllamaEmbeddingClient>(opt.base_url)));
     tools->registerTool(std::make_unique<ExecTool>(env.get(),2,false));
     // TAVILY_API_KEY rong -> WebSearchTool van dang ky binh thuong, chi tra
     // loi ro rang "chua cau hinh" khi agent thuc su goi toi (giong cach

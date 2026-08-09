@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # start_agent.sh - chay 1 lenh duy nhat thay vi phai export tay + tu bat
-# chromedriver moi lan. Dat file nay o thu muc goc repo (cung cap voi .env).
+# chromedriver moi lan. Dat file nay o thu muc scripts.
 #
 # Cach dung:
 #   chmod +x start_agent.sh
@@ -14,7 +14,7 @@
 # clone repo ve va muon go dung 1 lenh duy nhat. Buoc cai dat lan dau can
 # sudo (qua setup_chromedriver.sh) nen se hoi mat khau sudo neu chua cai.
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # 1. Nap .env cung thu muc (set -a de moi bien duoc export tu dong,
 #    khong can khai export tung dong).
