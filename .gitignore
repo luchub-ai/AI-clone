@@ -5,7 +5,8 @@ CMakefile/
 .vscode
 data/
 *.db
-
+benchmark_guiagent/gui_results
+benchmark_guiagent/workspaces
 
 # files ca nhan
 note.txt

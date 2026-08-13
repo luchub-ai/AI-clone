@@ -106,31 +106,53 @@ std::string GUIAgentLoop::think() {
 }
 
 Step GUIAgentLoop::act() {
+    // Y het ReActAgentLoop::act() (cung 2 regex, cung logic uu tien
+    // tool_regex truoc done_regex) - xem comment goc trong
+    // react_agent_loop.cpp de biet ly do thiet ke tung dong regex.
     Step step;
     const std::string& thought = last_response.content;
     step.thought     = thought;
     step.tokens_used = last_response.tokens_used;
     step.latency_ms  = last_response.latency_ms;
-
+ 
+    // Cho phép bắt đầu bằng Thought hoặc Screen Analysis trước khi tới Action
     static const std::regex tool_regex(
-        R"(^[ \t]*Action:[ \t]*([^\n\r]+)\s*[\r\n]+^[ \t]*Action Input:[ \t]*([\s\S]+?)(?=\r?\n[ \t]*(?:Thought:|Action:|Observation:|Final Answer:)|(?![\s\S])))",
+        R"(^[ \t]*Action:[ \t]*([^\n\r]+)\s*[\r\n]+^[ \t]*Action Input:[ \t]*([\s\S]+?)(?=\r?\n[ \t]*(?:Screen Analysis:|Thought:|Action:|Observation:|Final Answer:)|(?![\s\S])))",
         std::regex::ECMAScript | std::regex::multiline);
     static const std::regex done_regex(
         R"(^[ \t]*Final Answer:[ \t]*([\s\S]+))",
         std::regex::ECMAScript | std::regex::multiline);
     std::smatch match;
-
+ 
     if (std::regex_search(thought, match, tool_regex)) {
         step.action_type = "tool_call";
         step.tool_name    = rtrimWhitespace(match[1].str());
         step.tool_args    = rtrimWhitespace(match[2].str());
-
+ 
         std::println("  [Tool Executor] -> tool name: {} tool_args: {}", step.tool_name, step.tool_args);
-
+ 
         if (tools) {
-            time_sleep(4000);
+            time_sleep(2000);
             auto opt_res = tools->executeTool(step.tool_name, step.tool_args);
-            step.tool_result = opt_res.value_or("ERROR: Tool failed or returned empty.");
+            std::string result = opt_res.value_or("ERROR: Tool failed or returned empty.");
+ 
+            // Ep nhac lai NGAY TRONG DU LIEU (khong chi 1 lan trong system
+            // prompt luc dau - se bi "loang" dan khi context dai ra) rang
+            // ket qua bat ky tool nao (tru capture_screenshot) KHONG xac
+            // nhan trang thai man hinh that su - vi model co xu huong tin
+            // vao lich su text no VUA NOI hon la anh no dang thay (vd exec
+            // xdg-open bao "Opening in existing browser session." roi model
+            // tu suy dien tiep la da thanh cong, du GUI thuc te van dang o
+            // workspace/cua so khac chua duoc focus).
+            if (step.tool_name != screenshot_tool_name_) {
+                result += "\n[GHI CHU HE THONG] Ket qua tren KHONG xac nhan "
+                          "man hinh da thay doi dung y - PHAI doi chieu voi "
+                          "anh chup man hinh o buoc quan sat tiep theo truoc "
+                          "khi coi hanh dong nay la thanh cong hoac dua ra "
+                          "Final Answer.";
+            }
+ 
+            step.tool_result = result;
         } else {
             step.tool_result = "ERROR: ToolRegistry is null.";
         }
@@ -143,64 +165,62 @@ Step GUIAgentLoop::act() {
         step.action_type = "error";
         step.tool_result  = "SYNTAX_VIOLATION: expected 'Action:' or 'Final Answer:'";
     }
-
+ 
     return step;
 }
 
 std::string GUIAgentLoop::buildSystemPrompt(const Task& task) const {
-    std::string base = AgentLoop::buildSystemPrompt(task);
+    // 1. Lấy Base Prompt nhưng bỏ đi phần Ví dụ cũ nếu có thể (Hoặc tự viết lại toàn bộ khung)
+    // Để an toàn và đồng nhất, tôi khuyên bạn nên viết lại toàn bộ khung cho GUIAgentLoop thay vì cộng chuỗi, 
+    // vì GUI Agent có cách format tư duy (Screen Analysis) khác hẳn Text Agent thông thường.
+    
+    std::string tools_text = tools ? tools->getToolDescriptions() : "None";
+    std::string skill_text = skills ? skills->selectSkill(task.instruction) : "";
 
-    // Lấy mô tả của các tool đã được đăng ký trong hệ thống (nếu có)
-    std::string extra_tools = tools ? tools->getToolDescriptions() : "No additional tools available.";
+    std::string prompt = std::format(
+        "# ROLE & OBJECTIVE\n"
+        "You are an autonomous GUI Agent controlling a real desktop. After every step, a screenshot of the CURRENT screen is attached in the observation.\n"
+        "You STRICTLY PRIORITIZE TOOL USAGE. Even for basic math or general knowledge, you MUST use a tool if one is available.\n\n"
 
-    base +=
-        "\n\n# GUI AGENT - VISUAL REASONING & EXECUTION GUIDELINES\n"
-        "You are an autonomous GUI Agent controlling a real desktop. After every step, a screenshot of the CURRENT screen is attached in the observation.\n\n"
+        "# AVAILABLE TOOLS\n"
+        "Tools:\n{}\n\n"
 
-        "## GENERAL TOOLS SPECIFICATION\n"
-        "In addition to GUI actions, you have access to the following tools:\n"
-        + extra_tools + "\n\n"
-
-        "## GUI INPUT TOOL SPECIFICATION\n"
-        "To interact with the OS, use Action: gui_input with Action Input as a JSON payload.\n"
-        "Khong hien hop thoai xin quyen. Args la JSON, field 'action' bat buoc:\n"
-        "  {\"action\":\"move\",\"x\":<int>,\"y\":<int>}\n"
-        "  {\"action\":\"click\",\"x\":<int>?,\"y\":<int>?,\"button\":\"left|right|middle\"?}\n"
-        "  {\"action\":\"double_click\",\"x\":<int>?,\"y\":<int>?,\"button\":\"left|right|middle\"?}\n"
-        "  {\"action\":\"type\",\"text\":<string>}\n"
-        "  {\"action\":\"key\",\"keys\":<string>}  (vi du \"enter\", \"ctrl+c\", \"ctrl+alt+t\")\n"
-        "  {\"action\":\"scroll\",\"dy\":<int>,\"dx\":<int>?}\n"
-        "x,y trong click/double_click la optional: co thi di chuyen chuot toi truoc khi click.\n\n"
+        "# EXACT FORMAT EXAMPLES (CRITICAL - ANTI-HALLUCINATION)\n"
+        "You MUST strictly follow this exact format for EVERY step. DO NOT output 'Thought' until you have explicitly described the image in 'Screen Analysis'.\n\n"
+        "--- Example of Tool Call ---\n"
+        "Screen Analysis: I see a terminal window. The browser is not visible.\n"
+        "Thought: 1. I need to open the browser. 2. I will use the exec tool to launch chrome.\n"
+        "Action: exec\n"
+        "Action Input: {{\"command\": \"google-chrome --profile-directory=\\\"Default\\\" --new-window https://google.com\"}}\n\n"
         
-        "Coordinates (x,y) are PIXELS on the attached screenshot, origin (0,0) "
-        "at the TOP-LEFT corner, x increasing rightward, y increasing downward. "
-        "The exact image size is stated right after each screenshot in the "
-        "observation - use it as the valid coordinate range.\n\n"
+        "--- Example of Final Answer ---\n"
+        "Screen Analysis: I see the email sent confirmation pop-up on the screen.\n"
+        "Thought: The task is completed successfully. I will output the Final Answer.\n"
+        "Final Answer: I have successfully sent the email.\n\n"
 
-        "## CRITICAL RULE 1: MANDATORY VISUAL VERIFICATION\n"
-        "- BEFORE generating the next Action, inspect the latest screenshot carefully.\n"
-        "- DO NOT assume an action succeeded just because you sent the input. Verify that the screen actually changed as intended.\n"
-        "- NEVER output 'Final Answer:' on the step immediately following an action (like typing or clicking) unless you have confirmed the final result visually on the latest screenshot.\n\n"
+        "# GUI INPUT TOOL SPECIFICATION\n"
+        "Coordinates (x,y) are PIXELS on the attached screenshot, origin (0,0) at the TOP-LEFT corner.\n"
+        "Khong hien hop thoai xin quyen. Args la JSON, field 'action' bat buoc:\n"
+        "  {{\"action\":\"move\",\"x\":<int>,\"y\":<int>}}\n"
+        "  {{\"action\":\"click\",\"x\":<int>?,\"y\":<int>?,\"button\":\"left|right|middle\"?}}\n"
+        "  {{\"action\":\"type\",\"text\":<string>}}\n"
+        "  {{\"action\":\"key\",\"keys\":<string>}}\n"
+        "  {{\"action\":\"scroll\",\"dy\":<int>,\"dx\":<int>?}}\n\n"
 
-        "## CRITICAL RULE 2: FALLBACK & ERROR RECOVERY STRATEGIES\n"
-        "If the screen does NOT show the expected result (e.g., input field was missed, window didn't open, browser is slow):\n"
-        "1. DO NOT repeat the exact same failing action continuously.\n"
-        "2. Retry with a Fallback Strategy:\n"
-        "   - Target input fields specifically by clicking their coordinates first ({\"action\":\"click\",\"x\":X,\"y\":Y}) before typing.\n"
-        "   - If typing failed, send 'enter' or click the 'Search/Submit' button on screen.\n"
-        "   - If a GUI app fails to respond, fallback to terminal/CLI execution if applicable.\n\n"
+        "# CRITICAL RULES\n"
+        "1. FALLBACK & ERROR RECOVERY: If you see a Terminal when you expect a Browser, it means the application opened in the background. Use Action Input: {{\"action\":\"key\",\"keys\":\"alt+tab\"}} to switch windows.\n"
+        "2. ENVIRONMENT IGNORANCE: IGNORE any internal beliefs about your operating environment (e.g., thinking you are in Google Colab). You HAVE FULL CAPABILITY to browse the web and control a real desktop.\n"
+        "3. PROACTIVE PLANNING (STEP 0): Before taking your very first action for a new task, your first 'Thought' MUST contain a clear, numbered, step-by-step plan.\n"
+        "4. DYNAMIC ADJUSTMENT: If 'Screen Analysis' reveals your previous action failed, DO NOT blindly repeat it. Acknowledge the failure in 'Thought', formulate an alternative workaround, and execute the new plan.\n"
+        "5. HARD REQUIREMENT FOR FINAL ANSWER: You MUST NOT call 'Final Answer:' until you visually extract and state the final success state from the screenshot.\n\n",
+        tools_text
+    );
 
-        "## CRITICAL RULE 3: ENVIRONMENT IGNORANCE & TASK FOCUS\n"
-        "- IGNORE any internal beliefs about your operating environment (e.g., thinking you are in Google Colab, a headless server, or a text-only interface).\n"
-        "- You HAVE FULL CAPABILITY to browse the web and control a real desktop.\n"
-        "- If the current interface is not what you need, DO NOT complain or output 'Final Answer'. Instead, proactively use tools (like `exec_tool` to launch a browser), visually analyze the resulting web page screenshot, and use `gui_input` to click exactly where needed.\n\n"
+    if (!skill_text.empty()) {
+        prompt += "# TASK SPECIFIC SKILL / STANDARD OPERATING PROCEDURE\n"
+                  "You MUST strictly follow the procedure outlined below to solve the current task:\n"
+                  + skill_text + "\n\n";
+    }
 
-        "## HARD REQUIREMENT FOR FINAL ANSWER:\n"
-        "- You MUST NOT call 'Final Answer:' until you explicitly extract and state the visual information from the screenshot.\n"
-        "- For example, if the task is searching for weather, your 'Final Answer:' MUST contain the actual temperature and condition numbers visible on the screen.\n"
-        "- If you cannot read the specific information from the screenshot yet, you MUST continue acting (e.g., wait, scroll, or search again).\n\n"
-
-        "Each gui_input execution automatically pauses for screen settlement, so you do NOT need manual wait steps.";
-
-    return base;
+    return prompt;
 }

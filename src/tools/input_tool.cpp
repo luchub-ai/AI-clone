@@ -60,26 +60,38 @@ std::optional<std::string> InputTool::execute(const std::string& args) {
     }
     const std::string action = j["action"].get<std::string>();
 
+    std::optional<std::string> raw_result;
     if (action == "move") {
-        return handleMove(j);
-    }
-    if (action == "click") {
-        return handleClick(j, /*double_click=*/false);
-    }
-    if (action == "double_click") {
-        return handleClick(j, /*double_click=*/true);
-    }
-    if (action == "type") {
-        return handleType(j);
-    }
-    if (action == "key") {
-        return handleKey(j);
-    }
-    if (action == "scroll") {
-        return handleScroll(j);
+        raw_result = handleMove(j);
+    } else if (action == "click") {
+        raw_result = handleClick(j, /*double_click=*/false);
+    } else if (action == "double_click") {
+        raw_result = handleClick(j, /*double_click=*/true);
+    } else if (action == "type") {
+        raw_result = handleType(j);
+    } else if (action == "key") {
+        raw_result = handleKey(j);
+    } else if (action == "scroll") {
+        raw_result = handleScroll(j);
+    } else {
+        return std::nullopt; // action khong duoc ho tro
     }
 
-    return std::nullopt; // action khong duoc ho tro
+    if (!raw_result) {
+        return std::nullopt; // lenh that su that bai (vd ydotoold khong chay, JSON thieu field)
+    }
+
+    // QUAN TRONG: ydotool/uinput KHONG BAO GIO bao loi "click sai vi tri"
+    // hay "khong trung dich" - no chi bao loi khi khong goi duoc lenh he
+    // thong. "Thanh cong" o day CHI co nghia la DA GUI duoc su kien input
+    // toi kernel, KHONG co nghia la man hinh da thay doi dung y muon.
+    // Tra ve 1 cau text RO RANG thay vi chuoi rong - chuoi rong de bi
+    // model doc thanh "im lang = thanh cong hoan toan" (nguyen nhan
+    // hallucination da xac dinh duoc qua phan tich trajectory that te).
+    return "[Da gui lenh input: " + action + "] Luu y: ket qua nay CHUA "
+           "xac nhan man hinh da thay doi dung nhu mong doi - BAT BUOC "
+           "phai doi chieu voi anh chup man hinh o buoc quan sat tiep "
+           "theo truoc khi ket luan hanh dong nay thanh cong.";
 }
 
 std::optional<std::string> InputTool::handleMove(const nlohmann::json& j) {

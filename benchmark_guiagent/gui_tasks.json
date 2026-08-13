@@ -2,7 +2,7 @@
   {
     "id": "task_008",
     "description": "all tool",
-    "instruction": "lên google tra lê quang liêm là ai",
+    "instruction": "bạn gửi email giúp tôi với nội dung là \" mai là cuộc họp quan trọng, nhớ đến \" đến địa chỉ là nqkhanh2510@clc.fitus.edu.vn",
     "eval_type": "keyword",
     "eval_script": "w3school",
     "max_steps": 15

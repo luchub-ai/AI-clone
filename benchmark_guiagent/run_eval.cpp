@@ -99,19 +99,19 @@ namespace {
 // ── Cau hinh dong lenh / bien moi truong ──────────────────────────
 struct CliOptions {
     std::string tasks_path = "benchmark_guiagent/gui_tasks.json";
-    std::string out_dir    = "benchmark-guiagent/gui_results";
+    std::string out_dir    = "benchmark_guiagent/gui_results";
     std::string base_url   = "http://localhost:11434";
     std::string model      = "gemma4:e4b"; // model CO VISION - doi neu ban dung model khac
     std::string client     = "ollama";      // "ollama" | "colab"
-    float       temperature = 0.4f;         // huong dan visual can it "sang tao" hon text task thuan
+    float       temperature = 0.2f;         // huong dan visual can it "sang tao" hon text task thuan
     int         max_tokens  = 2048;
     std::string env_mode    = "native";     // BAT BUOC native cho GUI - xem check ben duoi main()
     std::vector<std::string> allowed_tools; // rong = cho phep tat ca tool da dang ky
 
     // Rieng cho GUI:
     std::optional<int> screenshot_max_width; // rong = KHONG resize anh chup man hinh
-    double scale_x = 1.0; // he so bu tru sai lech ydotool --absolute - xem GUI_AGENT_SETUP.md
-    double scale_y = 1.0;
+    double scale_x = 2.5; // he so bu tru sai lech ydotool --absolute - xem GUI_AGENT_SETUP.md
+    double scale_y = 2.5;
 };
 
 std::optional<std::string> eatFlagValue(const std::string& arg, const std::string& prefix) {
@@ -231,7 +231,7 @@ int main(int argc, char** argv) {
     std::cout << "[run_eval_gui] Da nap " << tasks.size() << " task tu " << opt.tasks_path << "\n";
 
     // === 2. Environment (luon NativeEnvironment) ===
-    auto env = std::make_unique<NativeEnvironment>("benchmark/workspace/gui_native_workspace");
+    auto env = std::make_unique<NativeEnvironment>("benchmark_guiagent/workspace/gui_native_workspace");
     if (!env->supportsGui()) {
         // Phong ho: neu sau nay co ai doi supportsGui() cua NativeEnvironment
         // thanh false vi ly do gi do, benchmark GUI phai bao loi ro rang

@@ -51,7 +51,7 @@ LLMResponse OllamaClient::chat(const std::vector<Message>& history) {
 
     curl_easy_setopt(curl, CURLOPT_URL, full_url.c_str());
 
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 200L); 
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L); 
 
 
     struct curl_slist* headers = nullptr;

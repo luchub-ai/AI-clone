@@ -75,7 +75,23 @@ constexpr unsigned char kFallbackCalculatorSkillBytes[] = {
             {"memory","memory"},
             {"bộ nhớ","memory"},
             {"kí ức","memory"},
-            {"kiếm lại","memory"}
+            {"kiếm lại","memory"},
+
+            // nhóm skill: mở app bằng exec tool (open_file.md)
+            {"execTool","open_app"},
+            {"mở app","open_app"},
+            {"open file","open_app"},
+            {"trình duyệt","open_app"},
+            {"google","open_app"},
+            {"chrome","open_app"},
+
+            // nhóm skill: mở app bằng exec tool (open_file.md)
+            {"gủi mail","send_mail"},
+            {"soạn mail","send_mail"},
+            {"gửi thư","send_mail"},
+            {"soạn thư","send_mail"},
+            
+            
         };
 
         // 3. Quét prompt xem có chứa dấu hiệu nào không
