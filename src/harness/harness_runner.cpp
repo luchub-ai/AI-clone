@@ -1,5 +1,6 @@
 #include "src/harness/harness_runner.h"
 #include <iostream>
+#include <thread> // std::thread - chi dung trong runParallel() ben duoi
 
 HarnessRunner::HarnessRunner(std::unique_ptr<Environment> env)
     : env_(std::move(env)) {
@@ -161,4 +162,145 @@ void HarnessRunner::printBatchSummary() const {
     } else {
         std::println("Khong co task nao cham diem duoc.");
     }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  Multi-agent coordination (de bai 10.3, +3d) — TOAN BO phan duoi day
+//  la THEM MOI, khong dong nao o tren (runAgent/runBatch/onStepRecorded/
+//  printBatchSummary) bi sua.
+// ════════════════════════════════════════════════════════════════
+
+void HarnessRunner::logStepThreadSafe(const std::string& label, Step step) {
+    std::lock_guard<std::mutex> lock(log_mutex_);
+    std::print("  [HarnessRunner][{}] step {} type={}",
+               label, step.step_id, step.action_type);
+
+    if (step.action_type == "tool_call") {
+        std::print(" tool={}", step.tool_name);
+    }
+
+    std::println(" tokens={} latency={}ms", step.tokens_used, step.latency_ms);
+}
+
+HarnessRunner::BatchResult HarnessRunner::runOneSubAgent(
+        const std::string& agent_id, AgentLoop& loop,
+        Environment& env, const Task& task) {
+    // Nhan log rieng cho sub-agent nay - CHUP (capture) theo GIA TRI vao
+    // lambda ngay tai day (tren thread goi runOneSubAgent(), tuc thread
+    // rieng cua job nay trong runParallel() ben duoi), KHONG doc lai
+    // current_task_id_ (member dung chung voi duong runBatch() 1-thread)
+    // luc hook chay - xem ly do trong .h.
+    const std::string label = agent_id + "/" + task.id;
+    loop.setStepHook([this, label](Step step) {
+        logStepThreadSafe(label, std::move(step));
+    });
+
+    BatchResult result;
+    result.task_id = task.id;
+
+    // Giong het RAII guard trong runBatch() o tren, nhung boc quanh `env`
+    // (tham so, Environment cua RIENG job nay) thay vi *env_ (member dung
+    // chung cho duong 1-agent).
+    env.setup();
+    struct EnvGuard {
+        Environment& env;
+        ~EnvGuard() { env.teardown(); }
+    } guard{env};
+
+    try {
+        result.trajectory = loop.run(task);
+    } catch (const std::exception& e) {
+        {
+            std::lock_guard<std::mutex> lock(log_mutex_);
+            std::println(stderr, "[HarnessRunner][{}] Agent crash o task {}: {}",
+                         agent_id, task.id, e.what());
+        }
+        result.agent_crashed = true;
+        return result; // guard van goi env.teardown() khi return roi scope
+    }
+
+    // Chon evaluator y het logic trong runBatch(): dung DUY NHAT 1
+    // evaluator khop task.eval_type. evaluators_ o day CHI DUOC DOC (xem
+    // tien dieu kien trong .h) nen an toan khi nhieu thread cung chay
+    // ham nay dong thoi.
+    const EvaluatorEntry* matched = nullptr;
+    for (const auto& entry : evaluators_) {
+        if (entry.type_key == task.eval_type) { matched = &entry; break; }
+    }
+
+    if (!matched) {
+        std::lock_guard<std::mutex> lock(log_mutex_);
+        std::println(stderr, "[HarnessRunner][{}] Khong tim thay evaluator cho eval_type='{}' (task {}), bo qua cham diem.",
+                     agent_id, task.eval_type, task.id);
+        // result.score giu nguyen gia tri mac dinh: unexpected(NotYetEvaluated)
+    } else {
+        try {
+            result.score = matched->evaluator->evaluate(result.trajectory, env, task);
+            if (!result.score) {
+                std::lock_guard<std::mutex> lock(log_mutex_);
+                std::println("[HarnessRunner][{}] Evaluator '{}'\n khong cham diem duoc task '{}' \n ly do: '{}'",
+                             agent_id, matched->type_key, task.id, toString(result.score.error()));
+            }
+        } catch (const std::exception& e) {
+            std::lock_guard<std::mutex> lock(log_mutex_);
+            std::println("[HarnessRunner][{}] Evaluator crash o task {}: {}",
+                         agent_id, task.id, e.what());
+            result.score = std::unexpected(EvalError::EvaluatorThrew);
+        }
+    }
+
+    constexpr float kSuccessThreshold = 1.0f; // dung chinh nguong voi runBatch()
+    result.task_success = result.trajectory.success
+                        && result.score.has_value()
+                        && *result.score >= kSuccessThreshold;
+
+    {
+        std::lock_guard<std::mutex> lock(log_mutex_);
+        std::println("[HarnessRunner][{}] Task {} -> score={} completed={} success={}",
+                     agent_id, task.id,
+                     result.score ? std::format("{}", *result.score) : "N/A",
+                     result.trajectory.success,
+                     result.task_success);
+    }
+
+    return result;
+    // guard destructor goi env.teardown() ngay tai day
+}
+
+std::vector<HarnessRunner::SubAgentResult> HarnessRunner::runParallel(std::vector<SubAgentJob> jobs) {
+    std::vector<SubAgentResult> results(jobs.size()); // pre-size - moi thread ghi dung 1 phan tu, xem .h
+    std::vector<std::thread> threads;
+    threads.reserve(jobs.size());
+
+    for (std::size_t i = 0; i < jobs.size(); ++i) {
+        // Capture theo REFERENCE toi jobs/results (song het ham nay nho
+        // threads.join() ben duoi truoc khi return) nhung CHI THAO TAC
+        // qua chi so `i` rieng cua tung thread - moi thread dung dung 1
+        // SubAgentJob (jobs[i]) va ghi dung 1 SubAgentResult (results[i]),
+        // khong thread nao cham vao phan tu cua thread khac.
+        threads.emplace_back([this, &jobs, &results, i]() {
+            SubAgentJob& job = jobs[i];
+            results[i].agent_id = job.agent_id;
+            results[i].result.task_id = job.task.id;
+
+            if (!job.env) {
+                std::lock_guard<std::mutex> lock(log_mutex_);
+                std::println(stderr, "[HarnessRunner][{}] Job thieu Environment - bo qua.", job.agent_id);
+                results[i].result.agent_crashed = true;
+                return;
+            }
+            if (!job.loop) {
+                std::lock_guard<std::mutex> lock(log_mutex_);
+                std::println(stderr, "[HarnessRunner][{}] Job thieu AgentLoop - bo qua.", job.agent_id);
+                results[i].result.agent_crashed = true;
+                return;
+            }
+
+            results[i].result = runOneSubAgent(job.agent_id, *job.loop, *job.env, job.task);
+        });
+    }
+
+    for (auto& t : threads) t.join();
+
+    return results;
 }

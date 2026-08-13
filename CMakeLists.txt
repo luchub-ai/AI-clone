@@ -72,3 +72,19 @@ target_include_directories(GUI_Agent PRIVATE
 )
 
 target_link_libraries(GUI_Agent PRIVATE sqlite3 CURL::libcurl nlohmann_json::nlohmann_json ${DBUS_LIBRARIES} Threads::Threads)
+
+# ---- Executable 3: multi_agent_demo (de bai 10.3 Multi-agent Coordination, +3d) ----
+# Dung LAI 100% ${SOURCE_FILES} (da bao gom san src/common/message_queue.cpp va
+# src/tools/message_queue_tool.cpp qua GLOB_RECURSE o tren, khong can khai bao
+# rieng) + HarnessRunner::runParallel() moi them trong src/harness/ - CHI khac
+# AI_Agent o hem main() rieng (benchmark/multi_agent_demo.cpp), giong dung cach
+# AI_Agent/run_eval tach nhau da co san phia tren.
+add_executable(multi_agent_demo ${PROJECT_SOURCE_DIR}/benchmark/multi_agent_demo.cpp ${SOURCE_FILES})
+target_include_directories(multi_agent_demo PRIVATE
+    ${PROJECT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/benchmark
+    ${PROJECT_SOURCE_DIR}/utils
+    ${DBUS_INCLUDE_DIRS}
+)
+target_link_libraries(multi_agent_demo PRIVATE sqlite3 CURL::libcurl nlohmann_json::nlohmann_json ${DBUS_LIBRARIES} Threads::Threads)
