@@ -51,7 +51,7 @@ LLMResponse ColabClient::chat(const std::vector<Message>& history) {
     curl_easy_setopt(curl, CURLOPT_URL, full_url.c_str());
     
     // [COLAB SPECIFIC]: Timeout dài cho model Vision trên Colab
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 200L); 
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 500L); 
 
     struct curl_slist* headers = nullptr;
     headers = curl_slist_append(headers, "Content-Type: application/json");

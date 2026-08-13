@@ -9,10 +9,10 @@
 #include <unordered_map>
 #include <vector>
 
-InputTool::InputTool(CommandRunner command_runner, double scale_x, double scale_y)
+InputTool::InputTool(CommandRunner command_runner, ScaleProvider scale_x, ScaleProvider scale_y)
     : command_runner_(std::move(command_runner)),
-      scale_x_(scale_x),
-      scale_y_(scale_y) {
+      scale_x_(std::move(scale_x)),
+      scale_y_(std::move(scale_y)) {
 }
 
 std::string InputTool::getName() const {
@@ -104,8 +104,8 @@ std::optional<std::string> InputTool::handleMove(const nlohmann::json& j) {
     // Ap he so scale_x_/scale_y_ de bu tru sai lech giua toa do model dua
     // ra (theo dung kich thuoc anh chup, model duoc GUIAgentLoop::observe()
     // bao ro) va toa do THUC ma ydotool --absolute nhan dien tren may nay.
-    const int x = static_cast<int>(std::lround(raw_x * scale_x_));
-    const int y = static_cast<int>(std::lround(raw_y * scale_y_));
+    const int x = static_cast<int>(std::lround(raw_x * scale_x_()));
+    const int y = static_cast<int>(std::lround(raw_y * scale_y_()));
 
     std::ostringstream cmd;
     cmd << "ydotool mousemove --absolute -x " << x << " -y " << y;

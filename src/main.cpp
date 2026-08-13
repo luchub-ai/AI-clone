@@ -132,8 +132,7 @@ void runInteractiveMenu(InputTool& tool) {
 
 int main() {
     // do vấn đề wayland (máy ubuntu, nên khi ánh xạ 1920/1080 nó tự về 768/432 -> scale = 0.4)
-    InputTool gui_tool(mockCommandRunner,0.4, 0.4);
-
+    InputTool gui_tool(mockCommandRunner, []{ return 0.4; }, []{ return 0.4; });
     // 1. Chay test co dinh truoc
     // runAutomatedTests(gui_tool);
 

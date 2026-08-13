@@ -47,4 +47,4 @@ echo "client=colab  base-url=${TUNNEL_URL}  model=${MODEL}"
     "${EXTRA_FLAGS[@]}"
 
 echo
-echo "Xong. Xem ket qua trong benchmark-guiagent/gui_results/summary.json"
+echo "Xong. Xem ket qua trong benchmark_guiagent/gui_results/summary.json"

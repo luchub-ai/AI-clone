@@ -258,10 +258,33 @@ int main(int argc, char** argv) {
         CommandRunner input_runner = [env_ptr](const std::string& cmd) {
             return env_ptr->execute(cmd, /*timeoutSeconds=*/5);
         };
-        tools->registerTool(std::make_unique<InputTool>(input_runner, opt.scale_x, opt.scale_y));
-        tools->registerTool(std::make_unique<ScreenshotTool>(
-            [env_ptr]() { return env_ptr->getWorkspace();}
-        ));
+        // QUAN TRONG: neu --max-width lam anh bi resize nho hon, toa do
+        // model tra ve se tinh tren anh NHO, trong khi InputTool/ydotool
+        // can toa do pixel THAT tren man hinh. ScreenshotTool tu tinh ti
+        // le resize (getLastResizeRatio()) sau lan chup DAU TIEN; ta nhan
+        // them ti le nay vao opt.scale_x/scale_y (von la he so hieu chinh
+        // DPI thu cong nguoi dung tu set qua CLI) truoc khi dua cho
+        // InputTool - de 2 loai sai lech (DPI + resize) duoc bu tru cung
+        // luc, InputTool khong can biet gi ve viec anh co bi resize hay
+        // khong.
+        auto screenshot_tool = std::make_unique<ScreenshotTool>(
+            [env_ptr]() { return env_ptr->getWorkspace();},
+            opt.screenshot_max_width
+        );
+        ScreenshotTool* screenshot_ptr = screenshot_tool.get();
+
+        auto input_tool = std::make_unique<InputTool>(
+            input_runner,
+            [screenshot_ptr, base = opt.scale_x]() {
+                return base * screenshot_ptr->getLastResizeRatio();
+            },
+            [screenshot_ptr, base = opt.scale_y]() {
+                return base * screenshot_ptr->getLastResizeRatio();
+            }
+        );
+
+        tools->registerTool(std::move(input_tool));
+        tools->registerTool(std::move(screenshot_tool));
     } else {
         std::cerr << "[run_eval_gui] CANH BAO: supportsGui() == false - InputTool/"
                      "ScreenshotTool KHONG duoc dang ky (khong nen xay ra vi da check o tren).\n";

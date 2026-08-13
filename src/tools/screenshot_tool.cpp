@@ -7,11 +7,84 @@
 #include <random>
 #include <sstream>
 
-ScreenshotTool::ScreenshotTool(WorkspaceProvider workspace_provider)
-    : workspace_provider_(std::move(workspace_provider)) {
+// Day la don vi bien dich (.cpp) DUY NHAT trong project include 3 file stb
+// nay voi macro IMPLEMENTATION - dinh nghia phan than ham thuc te. Neu file
+// .cpp khac cung define lai cac macro nay va include lai header, se bi loi
+// "multiple definition" luc link. Chi can 1 noi duy nhat.
+#define STB_IMAGE_IMPLEMENTATION
+#include "../../utils/stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "../../utils/stb_image_write.h"
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
+#include "../../utils/stb_image_resize2.h"
+
+ScreenshotTool::ScreenshotTool(WorkspaceProvider workspace_provider,
+                               std::optional<int> max_width)
+    : workspace_provider_(std::move(workspace_provider)),
+      max_width_(max_width) {
     // Khong tao thu muc o day: workspace co the chua san sang luc constructor
     // chay (Environment::setup() co the duoc goi sau khi tool da dang ky).
     // Thu muc se duoc tao lazy ngay truoc khi dung, trong generateOutputPath().
+}
+
+bool ScreenshotTool::resizeIfNeeded(const std::filesystem::path& path) {
+    if (!max_width_.has_value()) {
+        last_resize_ratio_ = 1.0;
+        return true; // khong yeu cau resize -> giu nguyen, khong tinh la loi
+    }
+
+    int orig_w = 0, orig_h = 0, channels = 0;
+    // "3" ep luon doc ra 3 channel (RGB) - bo alpha cho don gian, du cho
+    // muc dich model "nhin" anh, khong can trong suot.
+    unsigned char* pixels = stbi_load(path.string().c_str(), &orig_w, &orig_h,
+                                       &channels, 3);
+    if (!pixels) {
+        // Doc anh loi: khong resize, giu file goc, khong lam crash ca tool.
+        last_resize_ratio_ = 1.0;
+        return false;
+    }
+
+    if (orig_w <= *max_width_) {
+        // Anh da du nho, khong can resize.
+        stbi_image_free(pixels);
+        last_resize_ratio_ = 1.0;
+        return true;
+    }
+
+    const int new_w = *max_width_;
+    // Giu nguyen ti le khung hinh (aspect ratio).
+    const int new_h = static_cast<int>(
+        std::lround(static_cast<double>(orig_h) * new_w / orig_w));
+
+    std::vector<unsigned char> resized_pixels(
+        static_cast<size_t>(new_w) * new_h * 3);
+
+    unsigned char* result = stbir_resize_uint8_linear(
+        pixels, orig_w, orig_h, 0,
+        resized_pixels.data(), new_w, new_h, 0,
+        STBIR_RGB);
+
+    stbi_image_free(pixels);
+
+    if (!result) {
+        last_resize_ratio_ = 1.0;
+        return false;
+    }
+
+    const int write_ok = stbi_write_png(
+        path.string().c_str(), new_w, new_h, 3,
+        resized_pixels.data(), new_w * 3);
+
+    if (!write_ok) {
+        last_resize_ratio_ = 1.0;
+        return false;
+    }
+
+    // Ti le de InputTool nhan them vao scale_x/scale_y: toa do model tra ve
+    // duoc tinh tren anh MOI (nho hon), nen phai nhan nguoc lai ti le nay
+    // de ra dung toa do pixel tren man hinh that.
+    last_resize_ratio_ = static_cast<double>(orig_w) / new_w;
+    return true;
 }
 
 std::string ScreenshotTool::getName() const {
@@ -262,6 +335,11 @@ std::optional<std::string> ScreenshotTool::execute(const std::string& /*args*/) 
     if (ec) {
         return path_str;
     }
+
+    // Resize (neu can) NGAY TREN file da copy vao workspace - khong dung
+    // gi den anh goc trong /tmp cua portal. Loi resize khong lam fail ca
+    // tool: cu tra ve anh (kich thuoc goc) con hon la mat luon screenshot.
+    resizeIfNeeded(dest);
 
     return dest.string();
 }

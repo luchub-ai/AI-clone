@@ -43,16 +43,21 @@ using CommandRunner = std::function<std::optional<std::string>(const std::string
 //  toi truoc khi click; neu khong se click tai vi tri con tro hien tai)
 class InputTool : public Tool {
 public:
+    using ScaleProvider = std::function<double()>;
+
     // scale_x/scale_y: he so nhan them vao truoc khi goi ydotool, dung de
     // BU TRU sai lech giua toa do model dua ra (theo dung kich thuoc anh
     // chup man hinh, xem GUIAgentLoop::observe()) va toa do THUC TE ma
     // `ydotool mousemove --absolute` nhan dien tren may nay. Day KHONG
     // phai loi ly thuyet - la bug co that cua ydotool (vd co may bi lech
-    // dung 1/2 do phan giai). Mac dinh 1.0 (khong scale). Cach xac dinh
-    // gia tri dung: xem muc "Calibrate ydotool" trong GUI_AGENT_SETUP.md.
+    // dung 1/2 do phan giai). Truyen dang HAM (khong phai so co dinh) vi
+    // gia tri nay co the doi giua cac lan chup neu ScreenshotTool dang
+    // resize anh (xem ScreenshotTool::getLastResizeRatio) - ham duoc goi
+    // lai o MOI lan click/move, khong chi luc khoi tao InputTool (luc do
+    // chua co screenshot nao de biet ti le). Mac dinh: luon tra ve 1.0.
     explicit InputTool(CommandRunner command_runner,
-                        double scale_x = 1.0,
-                        double scale_y = 1.0);
+                        ScaleProvider scale_x = []{ return 1.0; },
+                        ScaleProvider scale_y = []{ return 1.0; });
 
     [[nodiscard]] std::string getName() const override;
     [[nodiscard]] std::string getDescription() const override;
@@ -61,8 +66,8 @@ public:
 
 private:
     CommandRunner command_runner_;
-    double scale_x_;
-    double scale_y_;
+    ScaleProvider scale_x_;
+    ScaleProvider scale_y_;
 
     // Thoi diem InputTool thuc thi gan nhat - dung de tinh khoang cach
     // toi lan goi tiep theo (xem execute() trong .cpp). nullopt o lan
