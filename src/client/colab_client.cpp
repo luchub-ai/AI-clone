@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 #include <chrono>
 #include <iostream>
+#include <sstream>
 #include <utility>
 #include "utils/resolve_imagebase64.h"
 
@@ -100,7 +101,15 @@ LLMResponse ColabClient::chat(const std::vector<Message>& history) {
     json request_body = {
         {"model", this->model_name},
         {"messages", messages_array},
-        {"stream", false},
+
+        // [FIX 524]: PHẢI stream:true để Ollama đẩy byte về NGAY khi có
+        // token đầu tiên, thay vì buffer toàn bộ response tới khi generate
+        // xong. Với stream:false, nếu tổng thời gian generate > 120s thì
+        // Cloudflare Proxy Read Timeout sẽ cắt kết nối (HTTP 524) vì không
+        // thấy byte nào chảy qua - dù origin server vẫn đang chạy bình
+        // thường. stream:true không làm model generate nhanh hơn, nhưng
+        // giữ connection "sống" trong mắt Cloudflare.
+        {"stream", true},
         
         // [COLAB SPECIFIC]: Giữ mô hình trên VRAM vĩnh viễn
         {"keep_alive", -1}, 
@@ -122,6 +131,26 @@ LLMResponse ColabClient::chat(const std::vector<Message>& history) {
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
 
     CURLcode res = curl_easy_perform(curl);
+
+    // [DEBUG ROOT-CAUSE 524]: breakdown thời gian THẬT của request này -
+    // để biết 125s đang nằm ở giai đoạn nào: DNS / TCP connect / TLS
+    // handshake / upload xong request / hay chờ byte đầu tiên từ server.
+    // Xoá khối này sau khi xác định xong nguyên nhân.
+    {
+        double t_dns = 0, t_connect = 0, t_tls = 0, t_pretransfer = 0, t_starttransfer = 0, t_total = 0;
+        curl_easy_getinfo(curl, CURLINFO_NAMELOOKUP_TIME, &t_dns);
+        curl_easy_getinfo(curl, CURLINFO_CONNECT_TIME, &t_connect);
+        curl_easy_getinfo(curl, CURLINFO_APPCONNECT_TIME, &t_tls);
+        curl_easy_getinfo(curl, CURLINFO_PRETRANSFER_TIME, &t_pretransfer);
+        curl_easy_getinfo(curl, CURLINFO_STARTTRANSFER_TIME, &t_starttransfer);
+        curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &t_total);
+        std::cerr << "[TIMING] DNS=" << t_dns << "s connect=" << t_connect
+                  << "s TLS=" << t_tls << "s request_sent_at=" << t_pretransfer
+                  << "s first_byte_at=" << t_starttransfer
+                  << "s total=" << t_total
+                  << "s | upload_phase=" << (t_pretransfer - t_tls)
+                  << "s wait_for_response=" << (t_starttransfer - t_pretransfer) << "s\n";
+    }
 
     if (res != CURLE_OK) {
         std::string curl_err = curl_easy_strerror(res);
@@ -146,29 +175,51 @@ LLMResponse ColabClient::chat(const std::vector<Message>& history) {
     curl_easy_cleanup(curl);
 
     // ===================================================================
-    // 3. BẪY LỖI "MALFORMED JSON" & BÓC TÁCH KẾT QUẢ
+    // 3. PARSE NDJSON STREAM: stream:true nghĩa là Ollama trả về NHIỀU
+    //    dòng JSON riêng biệt (mỗi dòng 1 delta token), KHÔNG phải 1 JSON
+    //    object duy nhất như trước -> phải tách dòng rồi ghép content lại,
+    //    lấy stats (tokens/duration) từ dòng cuối có "done": true.
     // ===================================================================
     setElapsedLatency();
+
+    std::string full_content;
+    bool got_done_line = false;
+    std::istringstream stream_buf(readBuffer);
+    std::string line;
+
     try {
-        json response_json = json::parse(readBuffer);
+        while (std::getline(stream_buf, line)) {
+            if (line.empty()) continue;
 
-        response.model = response_json.value("model", this->model_name);
-        response.tokens_used = response_json.value("prompt_eval_count", 0)
-                             + response_json.value("eval_count", 0);
+            json chunk = json::parse(line);
 
-        long long total_duration_ns = response_json.value("total_duration", 0LL);
-        if (total_duration_ns > 0) {
-            response.latency_ms = static_cast<int>(total_duration_ns / 1000000LL);
+            if (chunk.contains("message") && chunk["message"].contains("content")) {
+                full_content += chunk["message"]["content"].get<std::string>();
+            }
+
+            if (chunk.value("done", false)) {
+                got_done_line = true;
+                response.model = chunk.value("model", this->model_name);
+                response.tokens_used = chunk.value("prompt_eval_count", 0)
+                                     + chunk.value("eval_count", 0);
+
+                long long total_duration_ns = chunk.value("total_duration", 0LL);
+                if (total_duration_ns > 0) {
+                    response.latency_ms = static_cast<int>(total_duration_ns / 1000000LL);
+                }
+            }
         }
 
-        if (response_json.contains("message") && response_json["message"].contains("content")) {
-            response.content = response_json["message"]["content"].get<std::string>();
-            return response;
-        } else {
-            handleError("MISSING_MESSAGE_CONTENT_FIELD", readBuffer);
+        if (!got_done_line) {
+            // Bytes chảy về nhưng bị cắt giữa chừng (connection drop, v.v.)
+            // trước khi thấy dòng "done":true - vẫn coi là lỗi.
+            handleError("STREAM_INCOMPLETE_NO_DONE_LINE", readBuffer);
             return response;
         }
-    } 
+
+        response.content = full_content;
+        return response;
+    }
     catch (const json::parse_error& e) {
         handleError("MALFORMED_JSON_PARSING_FAILED", readBuffer);
         return response;
